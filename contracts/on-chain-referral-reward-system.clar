@@ -8,12 +8,14 @@
 (define-constant ERR_INSUFFICIENT_BALANCE (err u1005))
 (define-constant ERR_REWARD_ALREADY_CLAIMED (err u1006))
 (define-constant ERR_NO_REWARDS_AVAILABLE (err u1007))
+(define-constant ERR_INVALID_RANK (err u1008))
 
 (define-data-var next-referral-code uint u1000000)
 (define-data-var total-users uint u0)
 (define-data-var total-referrals uint u0)
 (define-data-var reward-per-referral uint u1000000)
 (define-data-var contract-balance uint u0)
+(define-data-var leaderboard-size uint u10)
 
 (define-map users
   principal
@@ -48,6 +50,14 @@
   }
 )
 
+(define-map leaderboard-entries
+  uint
+  {
+    user: principal,
+    referral-count: uint
+  }
+)
+
 (define-read-only (get-contract-owner)
   CONTRACT_OWNER
 )
@@ -75,6 +85,34 @@
 
 (define-read-only (get-referral-history (referrer principal) (referee principal))
   (map-get? referral-history { referrer: referrer, referee: referee })
+)
+
+(define-private (process-referral (referrer principal) (referee principal))
+  (let
+    (
+      (referrer-data (unwrap! (map-get? users referrer) ERR_USER_NOT_FOUND))
+      (reward-amount (var-get reward-per-referral))
+      (current-rewards (default-to { available-rewards: u0, claimed-rewards: u0 } (map-get? referral-rewards referrer)))
+    )
+    (map-set users referrer
+      (merge referrer-data { total-referrals: (+ (get total-referrals referrer-data) u1) })
+    )
+    (map-set referral-rewards referrer
+      {
+        available-rewards: (+ (get available-rewards current-rewards) reward-amount),
+        claimed-rewards: (get claimed-rewards current-rewards)
+      }
+    )
+    (map-set referral-history { referrer: referrer, referee: referee }
+      {
+        timestamp: stacks-block-height,
+        reward-amount: reward-amount,
+        is-claimed: false
+      }
+    )
+    (var-set total-referrals (+ (var-get total-referrals) u1))
+    (ok true)
+  )
 )
 
 (define-public (register-user (referred-by-code (optional uint)))
@@ -141,34 +179,6 @@
         (ok new-code)
       )
     )
-  )
-)
-
-(define-private (process-referral (referrer principal) (referee principal))
-  (let
-    (
-      (referrer-data (unwrap! (map-get? users referrer) ERR_USER_NOT_FOUND))
-      (reward-amount (var-get reward-per-referral))
-      (current-rewards (default-to { available-rewards: u0, claimed-rewards: u0 } (map-get? referral-rewards referrer)))
-    )
-    (map-set users referrer
-      (merge referrer-data { total-referrals: (+ (get total-referrals referrer-data) u1) })
-    )
-    (map-set referral-rewards referrer
-      {
-        available-rewards: (+ (get available-rewards current-rewards) reward-amount),
-        claimed-rewards: (get claimed-rewards current-rewards)
-      }
-    )
-    (map-set referral-history { referrer: referrer, referee: referee }
-      {
-        timestamp: stacks-block-height,
-        reward-amount: reward-amount,
-        is-claimed: false
-      }
-    )
-    (var-set total-referrals (+ (var-get total-referrals) u1))
-    (ok true)
   )
 )
 
@@ -272,5 +282,103 @@
       data (ok (get is-active data))
       ERR_USER_NOT_FOUND
     )
+  )
+)
+
+(define-public (update-leaderboard-entry (user principal))
+  (let
+    (
+      (user-data (unwrap! (map-get? users user) ERR_USER_NOT_FOUND))
+      (referral-count (get total-referrals user-data))
+    )
+    (begin
+      (update-leaderboard-simple user referral-count)
+      (ok true)
+    )
+  )
+)
+
+(define-private (update-leaderboard-simple (user principal) (referral-count uint))
+  (let
+    (
+      (entry-1 (map-get? leaderboard-entries u1))
+      (entry-2 (map-get? leaderboard-entries u2))
+      (entry-3 (map-get? leaderboard-entries u3))
+      (entry-4 (map-get? leaderboard-entries u4))
+      (entry-5 (map-get? leaderboard-entries u5))
+    )
+    (begin
+      (if (or (is-none entry-1) (and (is-some entry-1) (> referral-count (get referral-count (unwrap-panic entry-1)))))
+        (begin
+          (if (is-some entry-4) (map-set leaderboard-entries u5 (unwrap-panic entry-4)) false)
+          (if (is-some entry-3) (map-set leaderboard-entries u4 (unwrap-panic entry-3)) false)
+          (if (is-some entry-2) (map-set leaderboard-entries u3 (unwrap-panic entry-2)) false)
+          (if (is-some entry-1) (map-set leaderboard-entries u2 (unwrap-panic entry-1)) false)
+          (map-set leaderboard-entries u1 {user: user, referral-count: referral-count})
+          true
+        )
+        (if (or (is-none entry-2) (and (is-some entry-2) (> referral-count (get referral-count (unwrap-panic entry-2)))))
+          (begin
+            (if (is-some entry-4) (map-set leaderboard-entries u5 (unwrap-panic entry-4)) false)
+            (if (is-some entry-3) (map-set leaderboard-entries u4 (unwrap-panic entry-3)) false)
+            (if (is-some entry-2) (map-set leaderboard-entries u3 (unwrap-panic entry-2)) false)
+            (map-set leaderboard-entries u2 {user: user, referral-count: referral-count})
+            true
+          )
+          (if (> referral-count u0)
+            (begin
+              (map-set leaderboard-entries u5 {user: user, referral-count: referral-count})
+              true
+            )
+            true
+          )
+        )
+      )
+      true
+    )
+  )
+)
+
+(define-read-only (get-leaderboard-entry (rank uint))
+  (let
+    (
+      (board-size (var-get leaderboard-size))
+    )
+    (asserts! (<= rank board-size) (err ERR_INVALID_RANK))
+    (asserts! (> rank u0) (err ERR_INVALID_RANK))
+    (ok (map-get? leaderboard-entries rank))
+  )
+)
+
+(define-read-only (get-top-referrers)
+  (ok (list 
+    (map-get? leaderboard-entries u1)
+    (map-get? leaderboard-entries u2)
+    (map-get? leaderboard-entries u3)
+    (map-get? leaderboard-entries u4)
+    (map-get? leaderboard-entries u5)
+    (map-get? leaderboard-entries u6)
+    (map-get? leaderboard-entries u7)
+    (map-get? leaderboard-entries u8)
+    (map-get? leaderboard-entries u9)
+    (map-get? leaderboard-entries u10)
+  ))
+)
+
+(define-read-only (find-user-rank (user principal))
+  (let
+    (
+      (entry-1 (map-get? leaderboard-entries u1))
+      (entry-2 (map-get? leaderboard-entries u2))
+      (entry-3 (map-get? leaderboard-entries u3))
+      (entry-4 (map-get? leaderboard-entries u4))
+      (entry-5 (map-get? leaderboard-entries u5))
+    )
+    (if (and (is-some entry-1) (is-eq user (get user (unwrap-panic entry-1)))) (ok (some u1))
+    (if (and (is-some entry-2) (is-eq user (get user (unwrap-panic entry-2)))) (ok (some u2))
+    (if (and (is-some entry-3) (is-eq user (get user (unwrap-panic entry-3)))) (ok (some u3))
+    (if (and (is-some entry-4) (is-eq user (get user (unwrap-panic entry-4)))) (ok (some u4))
+    (if (and (is-some entry-5) (is-eq user (get user (unwrap-panic entry-5)))) (ok (some u5))
+    (ok none))))))
   )
 )
