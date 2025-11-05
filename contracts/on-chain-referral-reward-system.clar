@@ -12,12 +12,14 @@
 (define-constant ERR_MILESTONE_ALREADY_CLAIMED (err u1009))
 (define-constant ERR_MILESTONE_NOT_REACHED (err u1010))
 (define-constant ERR_INVALID_MILESTONE (err u1011))
+(define-constant ERR_CONTRACT_PAUSED (err u1012))
 
 (define-data-var next-referral-code uint u1000000)
 (define-data-var total-users uint u0)
 (define-data-var total-referrals uint u0)
 (define-data-var reward-per-referral uint u1000000)
 (define-data-var contract-balance uint u0)
+(define-data-var contract-paused bool false)
 (define-data-var leaderboard-size uint u10)
 (define-data-var milestone-1-threshold uint u5)
 (define-data-var milestone-1-reward uint u5000000)
@@ -84,6 +86,10 @@
   CONTRACT_OWNER
 )
 
+(define-read-only (is-contract-paused)
+  (var-get contract-paused)
+)
+
 (define-read-only (get-user-info (user principal))
   (map-get? users user)
 )
@@ -143,6 +149,7 @@
       (user-exists (map-get? users tx-sender))
       (new-code (var-get next-referral-code))
     )
+    (asserts! (not (var-get contract-paused)) ERR_CONTRACT_PAUSED)
     (asserts! (is-none user-exists) ERR_USER_ALREADY_REGISTERED)
     
     (match referred-by-code
@@ -212,6 +219,7 @@
       (available (get available-rewards reward-data))
       (current-balance (var-get contract-balance))
     )
+    (asserts! (not (var-get contract-paused)) ERR_CONTRACT_PAUSED)
     (asserts! (> available u0) ERR_NO_REWARDS_AVAILABLE)
     (asserts! (>= current-balance available) ERR_INSUFFICIENT_BALANCE)
     
@@ -241,6 +249,14 @@
   (begin
     (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_NOT_AUTHORIZED)
     (var-set reward-per-referral new-amount)
+    (ok true)
+  )
+)
+
+(define-public (set-contract-pause (paused bool))
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_NOT_AUTHORIZED)
+    (var-set contract-paused paused)
     (ok true)
   )
 )
@@ -314,6 +330,7 @@
       (referral-count (get total-referrals user-data))
     )
     (begin
+      (asserts! (not (var-get contract-paused)) ERR_CONTRACT_PAUSED)
       (update-leaderboard-simple user referral-count)
       (ok true)
     )
@@ -512,6 +529,7 @@
       (existing-claim (map-get? milestone-claims claim-key))
       (current-balance (var-get contract-balance))
     )
+    (asserts! (not (var-get contract-paused)) ERR_CONTRACT_PAUSED)
     (asserts! (and (>= milestone-id u1) (<= milestone-id u5)) ERR_INVALID_MILESTONE)
     (asserts! (>= (get total-referrals user-data) threshold) ERR_MILESTONE_NOT_REACHED)
     (asserts! (is-none existing-claim) ERR_MILESTONE_ALREADY_CLAIMED)
