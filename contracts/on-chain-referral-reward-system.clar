@@ -383,8 +383,8 @@
     (
       (board-size (var-get leaderboard-size))
     )
-    (asserts! (<= rank board-size) (err ERR_INVALID_RANK))
-    (asserts! (> rank u0) (err ERR_INVALID_RANK))
+    (asserts! (<= rank board-size) ERR_INVALID_RANK)
+    (asserts! (> rank u0) ERR_INVALID_RANK)
     (ok (map-get? leaderboard-entries rank))
   )
 )
@@ -602,5 +602,43 @@
       reward: (get-milestone-reward milestone-id)
     })
     ERR_INVALID_MILESTONE
+  )
+)
+
+(define-constant ERR_INVALID_MULTIPLIER (err u1013))
+
+(define-data-var default-multiplier uint u100)
+
+(define-map reward-multipliers
+  principal
+  uint
+)
+
+(define-read-only (get-reward-multiplier (user principal))
+  (let
+    (
+      (fallback (var-get default-multiplier))
+      (override (map-get? reward-multipliers user))
+      (multiplier (default-to fallback override))
+    )
+    (ok multiplier)
+  )
+)
+
+(define-public (set-reward-multiplier (user principal) (multiplier uint))
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_NOT_AUTHORIZED)
+    (asserts! (> multiplier u0) ERR_INVALID_MULTIPLIER)
+    (map-set reward-multipliers user multiplier)
+    (ok true)
+  )
+)
+
+(define-public (set-default-multiplier (multiplier uint))
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_NOT_AUTHORIZED)
+    (asserts! (> multiplier u0) ERR_INVALID_MULTIPLIER)
+    (var-set default-multiplier multiplier)
+    (ok true)
   )
 )
