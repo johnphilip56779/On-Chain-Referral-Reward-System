@@ -13,6 +13,7 @@
 (define-constant ERR_MILESTONE_NOT_REACHED (err u1010))
 (define-constant ERR_INVALID_MILESTONE (err u1011))
 (define-constant ERR_CONTRACT_PAUSED (err u1012))
+(define-constant ERR_INVALID_PERCENTAGE (err u1014))
 
 (define-data-var next-referral-code uint u1000000)
 (define-data-var total-users uint u0)
@@ -121,15 +122,28 @@
       (referrer-data (unwrap! (map-get? users referrer) ERR_USER_NOT_FOUND))
       (reward-amount (var-get reward-per-referral))
       (current-rewards (default-to { available-rewards: u0, claimed-rewards: u0 } (map-get? referral-rewards referrer)))
+      (kickback-pct (default-to u0 (map-get? kickback-percentages referrer)))
+      (kickback-amt (/ (* reward-amount kickback-pct) u100))
+      (referrer-amt (- reward-amount kickback-amt))
+      (referee-rewards (default-to { available-rewards: u0, claimed-rewards: u0 } (map-get? referral-rewards referee)))
     )
     (map-set users referrer
       (merge referrer-data { total-referrals: (+ (get total-referrals referrer-data) u1) })
     )
     (map-set referral-rewards referrer
       {
-        available-rewards: (+ (get available-rewards current-rewards) reward-amount),
+        available-rewards: (+ (get available-rewards current-rewards) referrer-amt),
         claimed-rewards: (get claimed-rewards current-rewards)
       }
+    )
+    (if (> kickback-amt u0)
+      (map-set referral-rewards referee
+        {
+          available-rewards: (+ (get available-rewards referee-rewards) kickback-amt),
+          claimed-rewards: (get claimed-rewards referee-rewards)
+        }
+      )
+      true
     )
     (map-set referral-history { referrer: referrer, referee: referee }
       {
@@ -639,6 +653,20 @@
     (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_NOT_AUTHORIZED)
     (asserts! (> multiplier u0) ERR_INVALID_MULTIPLIER)
     (var-set default-multiplier multiplier)
+    (ok true)
+  )
+)
+
+(define-map kickback-percentages principal uint)
+
+(define-read-only (get-kickback-percentage (user principal))
+  (default-to u0 (map-get? kickback-percentages user))
+)
+
+(define-public (set-kickback-percentage (percentage uint))
+  (begin
+    (asserts! (<= percentage u100) ERR_INVALID_PERCENTAGE)
+    (map-set kickback-percentages tx-sender percentage)
     (ok true)
   )
 )
